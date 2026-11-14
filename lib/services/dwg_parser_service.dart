@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui';
 import 'dart:ui' as ui;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
