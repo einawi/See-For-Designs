@@ -22,7 +22,7 @@ class ParsedDwgResult {
 }
 
 class DwgParserService {
-  static const _thumbnailSize = 300;
+  static const _thumbnailSize = 300.0;
 
   /// Simulates parsing a DWG file by generating a thumbnail and random dimensions.
   /// In a real app, this would use a native DWG parser (e.g., via FFI or platform channel).
