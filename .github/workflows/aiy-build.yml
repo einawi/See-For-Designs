@@ -1,5 +1,5 @@
 name: AIy build
-# aiy-workflow v4
+# aiy-workflow v7
 on:
   workflow_dispatch:
   push:
@@ -27,6 +27,9 @@ jobs:
         with:
           channel: stable
           cache: true
+      # caches Gradle downloads and build outputs between builds (1-2 minutes saved after the first build)
+      - uses: gradle/actions/setup-gradle@v5
+        continue-on-error: true
       - name: Use one fixed signing key
         # A helper step: it must NEVER stop the build. Without it Gradle makes its own debug key (the app builds, it just
         # may not install over an older build).
@@ -44,11 +47,46 @@ jobs:
               echo "::warning::The signing key could not be saved in the repository, so the next build may not install over this one."
             fi
           fi
+      - name: Prepare the Android build
+        continue-on-error: true
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/aiy-sdk.gradle <<'GRADLE'
+          // aiy-sdk-hook: Flutter plugins that ship an old compileSdk fail "checkDebugAarMetadata". Raise them to 36.
+          allprojects { p ->
+              if (p.name == 'app') return
+              def raise = {
+                  def android = p.extensions.findByName('android')
+                  if (android == null) return
+                  try {
+                      int cur = 0
+                      if (android.hasProperty('compileSdk') && android.compileSdk != null) {
+                          cur = android.compileSdk as int
+                      } else if (android.hasProperty('compileSdkVersion') && android.compileSdkVersion != null) {
+                          def m = (android.compileSdkVersion.toString() =~ /(\d+)/)
+                          if (m.find()) cur = m.group(1) as int
+                      }
+                      if (cur < 36) {
+                          if (android.hasProperty('compileSdk')) { android.compileSdk = 36 } else { android.compileSdkVersion(36) }
+                          p.logger.lifecycle("aiy-sdk-hook: ${p.name} compileSdk ${cur} -> 36")
+                      }
+                  } catch (Throwable t) {
+                      p.logger.warn("aiy-sdk-hook: ${p.name}: ${t.message}")
+                  }
+              }
+              if (p.state.executed) { raise() } else { p.afterEvaluate { raise() } }
+          }
+          GRADLE
       - name: Build the debug APK
         run: |
+          NAME=$(grep -m1 '^name:' pubspec.yaml | sed 's/^name:[[:space:]]*//' | tr -d '\r"')
           if [ ! -d android ]; then
-            NAME=$(grep -m1 '^name:' pubspec.yaml | sed 's/^name:[[:space:]]*//' | tr -d '\r"')
             flutter create --platforms android --org com.example --project-name "$NAME" .
+          elif [ ! -f android/app/build.gradle ] && [ ! -f android/app/build.gradle.kts ]; then
+            # An android/ folder exists but is incomplete (for example only icons): add what is missing, keep what is there.
+            TMPD=$(mktemp -d)
+            flutter create --platforms android --org com.example --project-name "$NAME" "$TMPD/p"
+            cp -rn "$TMPD/p/android/." android/
           fi
           if [ -f .aiy/app_name.txt ]; then
             LABEL=$(head -1 .aiy/app_name.txt | tr -d '\r' | sed 's/[&|\\]/ /g')
