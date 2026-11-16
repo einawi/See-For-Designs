@@ -80,7 +80,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
           );
           await context.read<DatabaseService>().updateDesign(updated);
           if (mounted) {
-            Navigator.pushNamed(context, '/design', arguments: updated.id);
+            Navigator.pushNamed(context, '/detail', arguments: updated.id);
           }
           return;
         }
@@ -95,7 +95,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
         );
         await context.read<DatabaseService>().insertDesign(newItem);
         if (mounted) {
-          Navigator.pushNamed(context, '/design', arguments: newItem.id);
+          Navigator.pushNamed(context, '/detail', arguments: newItem.id);
         }
         return;
       }
@@ -110,7 +110,7 @@ class _CatalogScreenState extends State<CatalogScreen> {
       );
       await context.read<DatabaseService>().insertDesign(newItem);
       if (mounted) {
-        Navigator.pushNamed(context, '/design', arguments: newItem.id);
+        Navigator.pushNamed(context, '/detail', arguments: newItem.id);
       }
     } catch (e) {
       if (mounted) {
@@ -261,7 +261,7 @@ class _DesignCard extends StatelessWidget {
     return Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => Navigator.pushNamed(context, '/design', arguments: design.id),
+        onTap: () => Navigator.pushNamed(context, '/detail', arguments: design.id),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
