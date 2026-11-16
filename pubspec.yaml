@@ -1,9 +1,6 @@
 name: see_for_designs
-
-dependency_overrides:
-  file_picker: ^8.0.0
 description: "Offline woodworking catalog that extracts designs from DWG CAD files."
-version: 1.0.3+5
+version: 1.0.0+1
 publish_to: "none"
 
 environment:
