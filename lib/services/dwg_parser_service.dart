@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:math';
-import 'dart:ui';
 import 'dart:ui' as ui;
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
@@ -22,7 +21,7 @@ class ParsedDwgResult {
 }
 
 class DwgParserService {
-  static const double _thumbnailSize = 300;
+  static const _thumbnailSize = 300;
 
   /// Simulates parsing a DWG file by generating a thumbnail and random dimensions.
   /// In a real app, this would use a native DWG parser (e.g., via FFI or platform channel).
