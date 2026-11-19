@@ -55,7 +55,7 @@ class PdfGenerator {
                   pw.Container(
                     width: 40,
                     height: 4,
-                    color: const PdfColor(0xFF38BDF8),
+                    color: PdfColor.fromInt(0xFF38BDF8),
                   ),
                 ],
               ),
@@ -74,7 +74,7 @@ class PdfGenerator {
               pw.Container(
                 width: 120,
                 height: 2,
-                color: const PdfColor(0xFF38BDF8),
+                color: PdfColor.fromInt(0xFF38BDF8),
               ),
               pw.SizedBox(height: 24),
 

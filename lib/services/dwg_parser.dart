@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:see_for_designs/models/design_model.dart';
 import 'package:uuid/uuid.dart';

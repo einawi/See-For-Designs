@@ -24,11 +24,11 @@ final ThemeData appTheme = ThemeData(
   navigationBarTheme: NavigationBarThemeData(
     backgroundColor: const Color(0xFF1E293B),
     indicatorColor: const Color(0xFF38BDF8),
-    labelTextColor: WidgetStatePropertyAll<TextStyle>(
+    labelTextStyle: WidgetStatePropertyAll<TextStyle>(
       const TextStyle(color: Color(0xFF94A3B8)),
     ),
-    iconColor: WidgetStatePropertyAll<Color>(
-      const Color(0xFF38BDF8),
+    iconTheme: WidgetStatePropertyAll<IconThemeData>(
+      const IconThemeData(color: Color(0xFF38BDF8)),
     ),
   ),
 );

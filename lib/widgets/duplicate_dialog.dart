@@ -143,7 +143,7 @@ class _PreviewCard extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(design.title, style: Theme.of(context).textTheme.bodyMedium),
-        Text(_formatDimensions(design), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFF94A3B8))),
+        Text(DuplicateDialog._formatDimensions(design), style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFF94A3B8))),
       ],
     );
   }
