@@ -1,5 +1,5 @@
 name: AIy quick check
-# aiy-workflow v7
+# aiy-workflow v9
 on:
   workflow_dispatch:
   push:
