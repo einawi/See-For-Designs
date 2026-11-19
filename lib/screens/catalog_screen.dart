@@ -1,13 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
-import 'package:see_for_designs/models/design_item.dart';
-import 'package:see_for_designs/services/database_service.dart';
-import 'package:see_for_designs/services/dwg_parser_service.dart';
-import 'package:see_for_designs/widgets/duplicate_conflict_dialog.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:see_for_designs/models/design_model.dart';
+import 'package:see_for_designs/providers/design_provider.dart';
 import 'package:see_for_designs/screens/design_detail_screen.dart';
+import 'package:see_for_designs/screens/trash_screen.dart';
+import 'package:see_for_designs/services/dwg_parser.dart';
+import 'package:see_for_designs/widgets/duplicate_dialog.dart';
 
 class CatalogScreen extends StatefulWidget {
   const CatalogScreen({super.key});
@@ -17,9 +17,8 @@ class CatalogScreen extends StatefulWidget {
 }
 
 class _CatalogScreenState extends State<CatalogScreen> {
-  final _searchController = TextEditingController();
-  String _searchQuery = '';
-  bool _isImporting = false;
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
 
   @override
   void dispose() {
@@ -27,118 +26,64 @@ class _CatalogScreenState extends State<CatalogScreen> {
     super.dispose();
   }
 
-  Future<void> _importDwg() async {
-    setState(() => _isImporting = true);
+  Future<void> _pickDwg() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['dwg'],
+    );
+    if (result == null) return;
+    final file = result.files.first;
+    final path = file.path;
+    if (path == null) return;
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['dwg', 'DWG'],
-      );
-      if (result == null || result.files.single.path == null) return;
-
-      final sourceFile = File(result.files.single.path!);
-      final appDir = await getApplicationDocumentsDirectory();
-      final dwgDir = Directory('${appDir.path}/dwg_files');
-      if (!await dwgDir.exists()) {
-        await dwgDir.create(recursive: true);
-      }
-      final fileName = result.files.single.name;
-      final destFile = File('${dwgDir.path}/$fileName');
-      if (await destFile.exists()) {
-        await destFile.delete();
-      }
-      await sourceFile.copy(destFile.path);
-
-      final parsed = await DwgParserService.parseDwgFile(destFile);
-
-      final existing = await _findDuplicate(parsed.title);
-      if (existing != null && mounted) {
-        final action = await showDialog<DuplicateAction>(
-          context: context,
-          builder: (context) => DuplicateConflictDialog(
-            existing: existing,
-            newTitle: parsed.title,
-            newWidth: parsed.widthMm,
-            newHeight: parsed.heightMm,
-            newDepth: parsed.depthMm,
-            newThumbnailPath: parsed.thumbnailPath,
-            newFilePath: destFile.path,
-          ),
-        );
-        if (action == DuplicateAction.keepExisting || action == null) {
-          return;
-        }
-        if (action == DuplicateAction.replace) {
-          final updated = existing.copyWith(
-            title: parsed.title,
-            widthMm: parsed.widthMm,
-            heightMm: parsed.heightMm,
-            depthMm: parsed.depthMm,
-            filePath: destFile.path,
-            thumbnailPath: parsed.thumbnailPath,
-            isTrashed: false,
-          );
-          await context.read<DatabaseService>().updateDesign(updated);
-          if (mounted) {
-            Navigator.pushNamed(context, '/design', arguments: updated.id);
-          }
-          return;
-        }
-        // keepBoth
-        final newItem = DesignItem(
-          title: '${parsed.title} (Copy)',
-          widthMm: parsed.widthMm,
-          heightMm: parsed.heightMm,
-          depthMm: parsed.depthMm,
-          filePath: destFile.path,
-          thumbnailPath: parsed.thumbnailPath,
-        );
-        await context.read<DatabaseService>().insertDesign(newItem);
-        if (mounted) {
-          Navigator.pushNamed(context, '/design', arguments: newItem.id);
-        }
-        return;
-      }
-
-      final newItem = DesignItem(
-        title: parsed.title,
-        widthMm: parsed.widthMm,
-        heightMm: parsed.heightMm,
-        depthMm: parsed.depthMm,
-        filePath: destFile.path,
-        thumbnailPath: parsed.thumbnailPath,
-      );
-      await context.read<DatabaseService>().insertDesign(newItem);
+      final design = await DwgParser.parseDwgFile(path);
       if (mounted) {
-        Navigator.pushNamed(context, '/design', arguments: newItem.id);
+        await context.read<DesignProvider>().addDesign(design);
+      }
+    } on DuplicateDesignException catch (e) {
+      if (mounted) {
+        final resolution = await DuplicateDialog.show(
+          context,
+          existing: e.existing,
+          incoming: e.incoming,
+        );
+        if (resolution == null) return;
+        final provider = context.read<DesignProvider>();
+        switch (resolution) {
+          case DuplicateResolution.keepExisting:
+            // Do nothing, keep existing
+            break;
+          case DuplicateResolution.replaceWithNew:
+            await provider.replaceDesign(e.existing, e.incoming);
+            break;
+          case DuplicateResolution.keepBoth:
+            await provider.keepBoth(e.existing, e.incoming);
+            break;
+        }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Import failed: $e')),
+          SnackBar(content: Text('Failed to import: $e')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _isImporting = false);
-    }
-  }
-
-  Future<DesignItem?> _findDuplicate(String title) async {
-    final db = context.read<DatabaseService>();
-    final designs = await db.getAllDesigns();
-    try {
-      return designs.firstWhere(
-        (d) => !d.isTrashed && d.title.toLowerCase() == title.toLowerCase(),
-      );
-    } catch (_) {
-      return null;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final db = context.watch<DatabaseService>();
-    final theme = Theme.of(context);
+    final provider = context.watch<DesignProvider>();
+    final designs = provider.designs.where((d) => !d.isTrashed).toList();
+    designs.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    final filtered = designs.where((d) => d.title.toLowerCase().contains(_query.toLowerCase())).toList();
+
+    // Group by first letter
+    final Map<String, List<DesignModel>> grouped = {};
+    for (final design in filtered) {
+      final firstLetter = design.title.isNotEmpty ? design.title[0].toUpperCase() : '#';
+      grouped.putIfAbsent(firstLetter, () => []).add(design);
+    }
+    final sortedLetters = grouped.keys.toList()..sort();
 
     return Scaffold(
       appBar: AppBar(
@@ -146,175 +91,136 @@ class _CatalogScreenState extends State<CatalogScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_outline),
-            tooltip: 'Trash',
-            onPressed: () => Navigator.pushNamed(context, '/trash'),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (_) => const TrashScreen()));
+            },
           ),
         ],
       ),
       body: Column(
         children: [
-          // Search Bar
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: const EdgeInsets.all(16.0),
             child: TextField(
               controller: _searchController,
+              onChanged: (v) => setState(() => _query = v),
               decoration: InputDecoration(
                 hintText: 'Search designs...',
                 prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchQuery.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      )
-                    : null,
+                filled: true,
+                fillColor: const Color(0xFF1E293B),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12.0),
+                  borderSide: BorderSide.none,
+                ),
               ),
-              onChanged: (value) => setState(() => _searchQuery = value.toLowerCase()),
             ),
           ),
-          // Catalog Grid
           Expanded(
-            child: FutureBuilder<List<DesignItem>>(
-              future: db.getAllDesigns(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
-                final designs = snapshot.data ?? [];
-                final filtered = designs.where((d) {
-                  return d.title.toLowerCase().contains(_searchQuery);
-                }).toList();
-
-                if (filtered.isEmpty) {
-                  return _buildEmptyState(theme);
-                }
-
-                return GridView.builder(
-                  padding: const EdgeInsets.all(16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 0.75,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
+            child: filtered.isEmpty
+                ? const Center(child: Text('No designs found'))
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    itemCount: sortedLetters.length,
+                    itemBuilder: (context, index) {
+                      final letter = sortedLetters[index];
+                      final letterDesigns = grouped[letter]!;
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: Text(
+                              letter,
+                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                color: const Color(0xFF38BDF8),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 12,
+                              childAspectRatio: 0.85,
+                            ),
+                            itemCount: letterDesigns.length,
+                            itemBuilder: (context, i) {
+                              final design = letterDesigns[i];
+                              return _DesignCard(design: design);
+                            },
+                          ),
+                        ],
+                      );
+                    },
                   ),
-                  itemCount: filtered.length,
-                  itemBuilder: (context, index) {
-                    final design = filtered[index];
-                    return _DesignCard(design: design);
-                  },
-                );
-              },
-            ),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _isImporting ? null : _importDwg,
+        onPressed: _pickDwg,
+        backgroundColor: const Color(0xFF38BDF8),
+        foregroundColor: const Color(0xFF0B0F19),
         child: const Icon(Icons.add),
-      ),
-    );
-  }
-
-  Widget _buildEmptyState(ThemeData theme) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.design_services,
-            size: 80,
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No designs yet',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Import a DWG file to get started',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
-            ),
-          ),
-        ],
       ),
     );
   }
 }
 
 class _DesignCard extends StatelessWidget {
-  final DesignItem design;
-
+  final DesignModel design;
   const _DesignCard({required this.design});
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: () => Navigator.pushNamed(context, '/design', arguments: design.id),
+        onTap: () {
+          Navigator.pushNamed(context, '/design', arguments: design);
+        },
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                child: design.thumbnailPath.isNotEmpty
-                    ? Image.file(
-                        File(design.thumbnailPath),
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        errorBuilder: (_, __, ___) => _placeholder(theme),
-                      )
-                    : _placeholder(theme),
-              ),
+              child: design.thumbnailPath != null && File(design.thumbnailPath!).existsSync()
+                  ? Image.file(File(design.thumbnailPath!), fit: BoxFit.cover)
+                  : Container(
+                      color: const Color(0xFF1E293B),
+                      child: const Center(
+                        child: Icon(Icons.image, size: 48, color: Color(0xFF38BDF8)),
+                      ),
+                    ),
             ),
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(12.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     design.title,
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    design.dimensionsText,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      fontFamily: 'monospace',
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                    '${design.widthMm.toStringAsFixed(1)} × ${design.heightMm.toStringAsFixed(1)} × ${design.depthMm.toStringAsFixed(1)} mm',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF94A3B8),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _placeholder(ThemeData theme) {
-    return Container(
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.2),
-      child: Center(
-        child: Icon(
-          Icons.image_not_supported,
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
         ),
       ),
     );

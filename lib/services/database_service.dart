@@ -1,29 +1,33 @@
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
-import 'package:see_for_designs/models/design_item.dart';
+import 'package:see_for_designs/models/design_model.dart';
 
-class DatabaseService extends ChangeNotifier {
-  static const _dbName = 'designs.db';
-  static const _dbVersion = 1;
-  static const _tableName = 'designs';
+class DatabaseService {
+  static final DatabaseService _instance = DatabaseService._internal();
+  factory DatabaseService() => _instance;
+  DatabaseService._internal();
 
-  Database? _database;
+  static const String _databaseName = 'designs.db';
+  static const String _tableName = 'designs';
+  static const int _databaseVersion = 1;
+
+  static Database? _database;
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDb();
+    _database = await _initDatabase();
     return _database!;
   }
 
-  Future<Database> _initDb() async {
-    final documentsDirectory = await getApplicationDocumentsDirectory();
-    // Use string concatenation to avoid external 'path' package
-    final dbPath = '${documentsDirectory.path}/$_dbName';
-    return await openDatabase(
-      dbPath,
-      version: _dbVersion,
+  Future<Database> _initDatabase() async {
+    final Directory documentsDirectory = await getApplicationDocumentsDirectory();
+    final String path =
+        '${documentsDirectory.path}${Platform.pathSeparator}$_databaseName';
+    return openDatabase(
+      path,
+      version: _databaseVersion,
       onCreate: _onCreate,
     );
   }
@@ -36,68 +40,84 @@ class DatabaseService extends ChangeNotifier {
         widthMm REAL NOT NULL,
         heightMm REAL NOT NULL,
         depthMm REAL NOT NULL,
-        filePath TEXT NOT NULL,
-        thumbnailPath TEXT NOT NULL,
-        createdAt TEXT NOT NULL,
-        isTrashed INTEGER NOT NULL DEFAULT 0
+        fileName TEXT NOT NULL,
+        createdAt INTEGER NOT NULL,
+        isTrashed INTEGER NOT NULL DEFAULT 0,
+        thumbnailPath TEXT
       )
     ''');
   }
 
-  Future<void> init() async {
-    await database;
-  }
-
-  Future<int> insertDesign(DesignItem item) async {
-    final db = await database;
-    final result = await db.insert(_tableName, item.toMap());
-    notifyListeners();
-    return result;
-  }
-
-  Future<List<DesignItem>> getAllDesigns({bool trashedOnly = false}) async {
-    final db = await database;
-    final maps = await db.query(
+  Future<int> insertDesign(DesignModel design) async {
+    final Database db = await database;
+    return db.insert(
       _tableName,
-      where: 'isTrashed = ?',
-      whereArgs: [trashedOnly ? 1 : 0],
-      orderBy: 'title ASC',
+      design.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
     );
-    return maps.map((map) => DesignItem.fromMap(map)).toList();
   }
 
-  Future<DesignItem?> getDesignById(String id) async {
-    final db = await database;
-    final maps = await db.query(
+  Future<int> updateDesign(DesignModel design) async {
+    final Database db = await database;
+    return db.update(
+      _tableName,
+      design.toMap(),
+      where: 'id = ?',
+      whereArgs: <Object?>[design.id],
+    );
+  }
+
+  Future<int> deleteDesign(String id) async {
+    final Database db = await database;
+    return db.delete(
       _tableName,
       where: 'id = ?',
-      whereArgs: [id],
+      whereArgs: <Object?>[id],
+    );
+  }
+
+  Future<List<DesignModel>> getAllDesigns() async {
+    final Database db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      _tableName,
+      orderBy: 'title COLLATE NOCASE ASC',
+    );
+    return List<DesignModel>.generate(
+      maps.length,
+      (int i) => DesignModel.fromMap(maps[i]),
+    );
+  }
+
+  Future<DesignModel?> getDesignById(String id) async {
+    final Database db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
+      _tableName,
+      where: 'id = ?',
+      whereArgs: <Object?>[id],
       limit: 1,
     );
     if (maps.isEmpty) return null;
-    return DesignItem.fromMap(maps.first);
+    return DesignModel.fromMap(maps.first);
   }
 
-  Future<int> updateDesign(DesignItem item) async {
-    final db = await database;
-    final result = await db.update(
+  Future<List<DesignModel>> getDesignsByTitle(String title) async {
+    final Database db = await database;
+    final List<Map<String, dynamic>> maps = await db.query(
       _tableName,
-      item.toMap(),
-      where: 'id = ?',
-      whereArgs: [item.id],
+      where: 'title = ? COLLATE NOCASE',
+      whereArgs: <Object?>[title],
     );
-    notifyListeners();
-    return result;
+    return List<DesignModel>.generate(
+      maps.length,
+      (int i) => DesignModel.fromMap(maps[i]),
+    );
   }
 
-  Future<int> deleteDesignPermanently(String id) async {
-    final db = await database;
-    final result = await db.delete(
-      _tableName,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-    notifyListeners();
-    return result;
+  Future<void> close() async {
+    final Database? db = _database;
+    if (db != null) {
+      await db.close();
+      _database = null;
+    }
   }
 }

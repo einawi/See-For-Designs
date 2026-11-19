@@ -1,29 +1,21 @@
 name: see_for_designs
-description: "Offline woodworking catalog that extracts designs from DWG CAD files."
+publish_to: 'none'
 version: 1.0.0+1
-publish_to: "none"
-
 environment:
-  sdk: ">=3.0.0 <4.0.0"
-
+  sdk: '>=3.0.0 <4.0.0'
 dependencies:
+  crypto: any
+  open_filex: any
+  package_info_plus: any
   flutter:
     sdk: flutter
-  sqflite: ^2.3.0
-  path_provider: ^2.1.1
-  file_picker: ^6.1.1
-  pdf: ^3.10.7
-  printing: ^5.11.1
-  share_plus: ^7.2.1
+  provider: ^6.1.5
+  shared_preferences: ^2.5.0
+  intl: ^0.20.0
+  path_provider: ^2.1.5
   uuid: ^4.2.1
-  intl: ^0.18.1
-  provider: ^6.1.1
-  flutter_svg: ^2.0.10
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^3.0.0
-
+  sqflite: ^2.3.0
+  pdf: ^3.10.7
+  file_picker: ^8.0.0
 flutter:
   uses-material-design: true
