@@ -1,5 +1,5 @@
 name: AIy build
-# aiy-workflow v7
+# aiy-workflow v9
 on:
   workflow_dispatch:
   push:
@@ -33,18 +33,30 @@ jobs:
       - name: Use one fixed signing key
         # A helper step: it must NEVER stop the build. Without it Gradle makes its own debug key (the app builds, it just
         # may not install over an older build).
+        env:
+          GH_TOKEN: ${{ github.token }}
         continue-on-error: true
         run: |
           mkdir -p ~/.android
+          # The signing key signs apps that update real phones. In a PUBLIC repository it would be public too: it is then not
+          # saved and an old saved key is not used (AIy offers to make the repository private before it publishes an update).
+          SAVE_KEY=1
+          if [ "$(gh api "repos/$GITHUB_REPOSITORY" --jq .private 2>/dev/null)" != "true" ]; then
+            SAVE_KEY=0
+            echo "::warning::This repository is public. Its signing key would be public too, so a one-time key is used and not saved. Make the repository private for real updates."
+            rm -f .aiy/debug.keystore
+          fi
           if [ -f .aiy/debug.keystore ]; then
             cp .aiy/debug.keystore ~/.android/debug.keystore
           else
             keytool -genkeypair -keystore ~/.android/debug.keystore -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+            if [ "$SAVE_KEY" = "1" ]; then
             mkdir -p .aiy
             cp ~/.android/debug.keystore .aiy/debug.keystore
             # "add -f": many Android projects ignore *.keystore / *.jks, and a plain "git add" then fails.
             if ! ( git config user.name "AIy" && git config user.email "aiy@users.noreply.github.com" && git add -f .aiy/debug.keystore && git commit -q -m "AIy: fixed signing key so builds can update each other" && git push origin "HEAD:${GITHUB_REF_NAME}" ); then
               echo "::warning::The signing key could not be saved in the repository, so the next build may not install over this one."
+            fi
             fi
           fi
       - name: Prepare the Android build
@@ -77,7 +89,13 @@ jobs:
               if (p.state.executed) { raise() } else { p.afterEvaluate { raise() } }
           }
           GRADLE
-      - name: Build the debug APK
+      - name: Restore the native setup (when the repository has one)
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/.aiy/native.zip" ]; then
+            unzip -oq "$GITHUB_WORKSPACE/.aiy/native.zip" -d .
+            echo "Restored the native setup from .aiy/native.zip"
+          fi
+      - name: Build the APK
         run: |
           NAME=$(grep -m1 '^name:' pubspec.yaml | sed 's/^name:[[:space:]]*//' | tr -d '\r"')
           if [ ! -d android ]; then
@@ -95,8 +113,35 @@ jobs:
           if [ -f .aiy/icon.png ]; then
             for d in android/app/src/main/res/mipmap-*; do cp .aiy/icon.png "$d/ic_launcher.png"; done
           fi
+          # A project that signs its release build from android/key.properties (the AIy setup wizard writes that block) gets one
+          # that points to the fixed key above, so the release build is signed with it.
+          G=$(ls android/app/build.gradle.kts android/app/build.gradle 2>/dev/null | head -1)
+          if [ -n "$G" ] && grep -q "aiy-signing-begin" "$G" && [ ! -f android/key.properties ]; then
+            printf 'storePassword=android\nkeyPassword=android\nkeyAlias=androiddebugkey\nstoreFile=%s\n' "$HOME/.android/debug.keystore" > android/key.properties
+          fi
+          # Update support (lib/aiy_update.dart, added by AIy): the name of the public release repository is written at build time
+          # (owner/name-releases; a trailing -updates of the build repository is dropped), and the manifest gets the two permissions.
+          if [ -f lib/aiy_update.dart ]; then
+            BASE="${GITHUB_REPOSITORY#*/}"; BASE="${BASE%-updates}"
+            printf "// Written by AIy at build time. Do not edit.\nconst String kAiyUpdateRepo = '%s';\n" "${GITHUB_REPOSITORY%%/*}/${BASE}-releases" > lib/aiy_update_config.dart
+            MAN=android/app/src/main/AndroidManifest.xml
+            for PERM in REQUEST_INSTALL_PACKAGES INTERNET; do
+              if [ -f "$MAN" ] && ! grep -q "android.permission.$PERM" "$MAN"; then
+                sed -i "0,/<manifest[^>]*>/s//&\n    <uses-permission android:name=\"android.permission.$PERM\"\/>/" "$MAN"
+              fi
+            done
+          fi
+          echo "Signing key SHA-1 (add it to Firebase for Google sign-in): $(keytool -list -v -keystore "$HOME/.android/debug.keystore" -storepass android 2>/dev/null | grep -m1 'SHA1:' | sed 's/^ *//')"
           flutter pub get
-          flutter build apk --debug
+          # A release build for 64-bit phones is about 40-65 MB; the debug build with every processor type is about 150 MB.
+          # The release build uses the project's own signing (Flutter's default: the same fixed debug key as above), so it still
+          # installs over the earlier version. If it cannot be built, the debug app is built instead.
+          if flutter build apk --release --target-platform android-arm64 --no-shrink --build-number "$GITHUB_RUN_NUMBER"; then
+            echo "Built the release app (arm64)"
+          else
+            echo "::warning::The release build failed, building the larger debug app instead"
+            flutter build apk --debug --build-number "$GITHUB_RUN_NUMBER"
+          fi
       - uses: actions/upload-artifact@v5
         with:
           name: apk
